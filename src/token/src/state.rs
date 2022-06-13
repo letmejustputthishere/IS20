@@ -73,20 +73,6 @@ impl Balances {
     pub fn balance_of(&self, who: &Principal) -> Nat {
         self.0.get(who).cloned().unwrap_or_else(|| Nat::from(0))
     }
-
-    pub fn get_holders(&self, start: usize, limit: usize) -> Vec<(Principal, Nat)> {
-        let mut balance = self
-            .0
-            .iter()
-            .map(|(&k, v)| (k, v.clone()))
-            .collect::<Vec<_>>();
-
-        // Sort balance and principals by the balance
-        balance.sort_by(|a, b| b.1.cmp(&a.1));
-
-        let end = (start + limit).min(balance.len());
-        balance[start..end].to_vec()
-    }
 }
 
 #[derive(Default, CandidType, Deserialize)]

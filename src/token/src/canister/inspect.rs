@@ -11,6 +11,7 @@ static PUBLIC_METHODS: &[&str] = &[
     "decimals",
     "getAllowanceSize",
     "getHolders",
+    "getHoldersBetween",
     "getMetadata",
     "getTokenInfo",
     "getTransaction",
