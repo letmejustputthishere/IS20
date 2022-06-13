@@ -1,15 +1,17 @@
 use crate::ledger::Ledger;
 use crate::types::{Allowances, AuctionInfo, StatsData, Timestamp};
+
 use candid::{CandidType, Deserialize, Nat, Principal};
 use common::types::Metadata;
 use ic_storage::stable::Versioned;
 use ic_storage::IcStorage;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Default, CandidType, Deserialize, IcStorage)]
 pub struct CanisterState {
     pub(crate) bidding_state: BiddingState,
     pub(crate) balances: Balances,
+    pub(crate) balances_tree: BalancesTree,
     pub(crate) auction_history: AuctionHistory,
     pub(crate) stats: StatsData,
     pub(crate) allowances: Allowances,
@@ -84,6 +86,41 @@ impl Balances {
 
         let end = (start + limit).min(balance.len());
         balance[start..end].to_vec()
+    }
+}
+
+#[derive(Default, CandidType, Deserialize)]
+pub struct BalancesTree(pub BTreeSet<(Nat, Principal)>);
+
+impl BalancesTree {
+    pub fn get_holders(&self, start: usize, limit: usize) -> Vec<(Principal, Nat)> {
+        let mut balance = Vec::new();
+        for (i, (v, k)) in self.0.iter().rev().enumerate() {
+            if i >= start && i < start + limit {
+                balance.push((*k, v.clone()));
+            }
+            if i >= start + limit {
+                break;
+            }
+        }
+        balance
+    }
+
+    pub fn get_holders_between(&self, max: Nat, min: Nat) -> Vec<(Principal, Nat)> {
+        let min_principal = Principal::from_slice(&[]);
+        let max_principal = Principal::from_slice(&[
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        ]);
+        let max_new = max.clone().max(min.clone());
+        let min_new = min.min(max);
+        let balance = self
+            .0
+            .range((min_new, min_principal)..=(max_new, max_principal))
+            .rev()
+            .map(|(v, k)| (*k, v.clone()))
+            .collect();
+        balance
     }
 }
 

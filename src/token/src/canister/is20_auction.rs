@@ -3,7 +3,7 @@
 use crate::canister::erc20_transactions::_transfer;
 use crate::canister::TokenCanister;
 use crate::ledger::Ledger;
-use crate::state::{AuctionHistory, Balances, BiddingState, CanisterState};
+use crate::state::{AuctionHistory, Balances, BalancesTree, BiddingState, CanisterState};
 use crate::types::{AuctionInfo, StatsData, Timestamp};
 use candid::{CandidType, Deserialize, Nat, Principal};
 use ic_canister::ic_kit::ic;
@@ -95,13 +95,20 @@ pub(crate) fn run_auction(canister: &TokenCanister) -> Result<AuctionInfo, Aucti
     let CanisterState {
         ref mut bidding_state,
         ref mut balances,
+        ref mut balances_tree,
         ref mut auction_history,
         ref mut ledger,
         ref stats,
         ..
     } = &mut *state;
 
-    let result = perform_auction(ledger, bidding_state, balances, auction_history);
+    let result = perform_auction(
+        ledger,
+        bidding_state,
+        balances,
+        balances_tree,
+        auction_history,
+    );
     reset_bidding_state(stats, bidding_state);
 
     result
@@ -125,6 +132,7 @@ fn perform_auction(
     ledger: &mut Ledger,
     bidding_state: &mut BiddingState,
     balances: &mut Balances,
+    balances_tree: &mut BalancesTree,
     auction_history: &mut AuctionHistory,
 ) -> Result<AuctionInfo, AuctionError> {
     if bidding_state.bids.is_empty() {
@@ -139,7 +147,13 @@ fn perform_auction(
 
     for (bidder, cycles) in &bidding_state.bids {
         let amount = total_amount.clone() * *cycles / total_cycles;
-        _transfer(balances, auction_principal(), *bidder, amount.clone());
+        _transfer(
+            balances,
+            balances_tree,
+            auction_principal(),
+            *bidder,
+            amount.clone(),
+        );
         ledger.auction(*bidder, amount.clone());
         transferred_amount += amount;
     }

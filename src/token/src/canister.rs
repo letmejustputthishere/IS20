@@ -61,6 +61,11 @@ impl TokenCanister {
             .balances
             .0
             .insert(metadata.owner, metadata.totalSupply.clone());
+        self.state
+            .borrow_mut()
+            .balances_tree
+            .0
+            .insert((metadata.totalSupply.clone(), metadata.owner));
 
         self.state.borrow_mut().ledger.mint(
             metadata.owner,
@@ -91,7 +96,15 @@ impl TokenCanister {
 
     #[query]
     fn getHolders(&self, start: usize, limit: usize) -> Vec<(Principal, Nat)> {
-        self.state.borrow().balances.get_holders(start, limit)
+        self.state.borrow().balances_tree.get_holders(start, limit)
+    }
+
+    #[query]
+    fn getHoldersBetween(&self, max: Nat, min: Nat) -> Vec<(Principal, Nat)> {
+        self.state
+            .borrow()
+            .balances_tree
+            .get_holders_between(max, min)
     }
 
     #[query]

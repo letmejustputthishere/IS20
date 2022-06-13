@@ -5,7 +5,7 @@ use ic_cdk::export::Principal;
 
 use crate::canister::is20_auction::auction_principal;
 use crate::principal::{CheckedPrincipal, Owner, TestNet, WithRecipient};
-use crate::state::{Balances, CanisterState};
+use crate::state::{Balances, BalancesTree, CanisterState};
 use crate::types::{TxError, TxReceipt};
 
 use super::TokenCanister;
@@ -18,6 +18,7 @@ pub fn transfer(
 ) -> TxReceipt {
     let CanisterState {
         ref mut balances,
+        ref mut balances_tree,
         ref mut ledger,
         ref stats,
         ref bidding_state,
@@ -37,8 +38,21 @@ pub fn transfer(
         return Err(TxError::InsufficientBalance);
     }
 
-    _charge_fee(balances, caller.inner(), fee_to, fee.clone(), fee_ratio);
-    _transfer(balances, caller.inner(), caller.recipient(), value.clone());
+    _charge_fee(
+        balances,
+        balances_tree,
+        caller.inner(),
+        fee_to,
+        fee.clone(),
+        fee_ratio,
+    );
+    _transfer(
+        balances,
+        balances_tree,
+        caller.inner(),
+        caller.recipient(),
+        value.clone(),
+    );
 
     let id = ledger.transfer(caller.inner(), caller.recipient(), value, fee);
     Ok(id)
@@ -54,6 +68,7 @@ pub fn transfer_from(
     let from_allowance = state.allowance(from, caller.inner());
     let CanisterState {
         ref mut balances,
+        ref mut balances_tree,
         ref bidding_state,
         ref stats,
         ..
@@ -72,8 +87,21 @@ pub fn transfer_from(
         return Err(TxError::InsufficientBalance);
     }
 
-    _charge_fee(balances, from, fee_to, fee.clone(), fee_ratio);
-    _transfer(balances, from, caller.recipient(), value.clone());
+    _charge_fee(
+        balances,
+        balances_tree,
+        from,
+        fee_to,
+        fee.clone(),
+        fee_ratio,
+    );
+    _transfer(
+        balances,
+        balances_tree,
+        from,
+        caller.recipient(),
+        value.clone(),
+    );
 
     let allowances = &mut state.allowances;
     match allowances.get(&from) {
@@ -111,6 +139,7 @@ pub fn approve(
     let CanisterState {
         ref mut bidding_state,
         ref mut balances,
+        ref mut balances_tree,
         ref stats,
         ..
     } = &mut *state;
@@ -121,7 +150,14 @@ pub fn approve(
         return Err(TxError::InsufficientBalance);
     }
 
-    _charge_fee(balances, caller.inner(), fee_to, fee.clone(), fee_ratio);
+    _charge_fee(
+        balances,
+        balances_tree,
+        caller.inner(),
+        fee_to,
+        fee.clone(),
+        fee_ratio,
+    );
     let v = value.clone() + fee.clone();
 
     match state.allowances.get(&caller.inner()) {
@@ -217,23 +253,34 @@ pub fn burn_as_owner(
     burn(canister, caller.inner(), from, amount)
 }
 
-pub fn _transfer(balances: &mut Balances, from: Principal, to: Principal, value: Nat) {
+pub fn _transfer(
+    balances: &mut Balances,
+    balances_tree: &mut BalancesTree,
+    from: Principal,
+    to: Principal,
+    value: Nat,
+) {
     let from_balance = balances.balance_of(&from);
+    balances_tree.0.remove(&(from_balance.clone(), from));
     let from_balance_new = from_balance - value.clone();
     if from_balance_new != 0 {
-        balances.0.insert(from, from_balance_new);
+        balances.0.insert(from, from_balance_new.clone());
+        balances_tree.0.insert((from_balance_new, from));
     } else {
         balances.0.remove(&from);
     }
     let to_balance = balances.balance_of(&to);
+    balances_tree.0.remove(&(to_balance.clone(), to));
     let to_balance_new = to_balance + value;
     if to_balance_new != 0 {
-        balances.0.insert(to, to_balance_new);
+        balances.0.insert(to, to_balance_new.clone());
+        balances_tree.0.insert((to_balance_new, to));
     }
 }
 
 pub fn _charge_fee(
     balances: &mut Balances,
+    balances_tree: &mut BalancesTree,
     user: Principal,
     fee_to: Principal,
     fee: Nat,
@@ -244,8 +291,14 @@ pub fn _charge_fee(
         let auction_fee_amount =
             fee.clone() * (fee_ratio * INT_CONVERSION_K as f64) as u64 / INT_CONVERSION_K;
         let owner_fee_amount = fee - auction_fee_amount.clone();
-        _transfer(balances, user, fee_to, owner_fee_amount);
-        _transfer(balances, user, auction_principal(), auction_fee_amount);
+        _transfer(balances, balances_tree, user, fee_to, owner_fee_amount);
+        _transfer(
+            balances,
+            balances_tree,
+            user,
+            auction_principal(),
+            auction_fee_amount,
+        );
     }
 }
 
@@ -778,5 +831,63 @@ mod tests {
             canister.transfer(bob(), Nat::from(10), None).unwrap();
         }
         assert_eq!(canister.getUserTransactionCount(alice()), Nat::from(COUNT));
+    }
+
+    #[test]
+    fn get_holders() {
+        let canister = test_canister();
+        canister.state.borrow_mut().stats.fee = Nat::from(50);
+        canister.state.borrow_mut().stats.fee_to = john();
+
+        assert!(canister.transfer(bob(), Nat::from(300), None).is_ok());
+        assert!(canister.transfer(xtc(), Nat::from(200), None).is_ok());
+
+        assert_eq!(
+            canister.getHolders(0, 100),
+            vec![
+                (alice(), Nat::from(400)),
+                (bob(), Nat::from(300)),
+                (xtc(), Nat::from(200)),
+                (john(), Nat::from(100))
+            ]
+        );
+
+        assert!(canister.transfer(xtc(), Nat::from(50), None).is_ok());
+        assert!(canister.transfer(xtc(), Nat::from(50), None).is_ok());
+
+        assert_eq!(
+            canister.getHolders(0, 100),
+            vec![
+                (xtc(), Nat::from(300)),
+                (bob(), Nat::from(300)),
+                (alice(), Nat::from(200)),
+                (john(), Nat::from(200))
+            ]
+        );
+    }
+
+    #[test]
+    fn get_holders_between() {
+        let canister = test_canister();
+        canister.state.borrow_mut().stats.fee = Nat::from(50);
+        canister.state.borrow_mut().stats.fee_to = john();
+
+        assert!(canister.transfer(bob(), Nat::from(300), None).is_ok());
+        assert!(canister.transfer(xtc(), Nat::from(200), None).is_ok());
+
+        assert_eq!(
+            canister.getHoldersBetween(Nat::from(400), Nat::from(100)),
+            vec![
+                (alice(), Nat::from(400)),
+                (bob(), Nat::from(300)),
+                (xtc(), Nat::from(200)),
+                (john(), Nat::from(100))
+            ]
+        );
+
+        assert_eq!(
+            canister.getHoldersBetween(Nat::from(310), Nat::from(200)),
+            vec![(bob(), Nat::from(300)), (xtc(), Nat::from(200))]
+        );
     }
 }

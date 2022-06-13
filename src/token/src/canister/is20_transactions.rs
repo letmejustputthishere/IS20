@@ -17,6 +17,7 @@ pub fn transfer_include_fee(
 ) -> TxReceipt {
     let CanisterState {
         ref mut balances,
+        ref mut balances_tree,
         ref mut ledger,
         ref bidding_state,
         ref stats,
@@ -34,9 +35,17 @@ pub fn transfer_include_fee(
         return Err(TxError::InsufficientBalance);
     }
 
-    _charge_fee(balances, caller.inner(), fee_to, fee.clone(), fee_ratio);
+    _charge_fee(
+        balances,
+        balances_tree,
+        caller.inner(),
+        fee_to,
+        fee.clone(),
+        fee_ratio,
+    );
     _transfer(
         balances,
+        balances_tree,
         caller.inner(),
         caller.recipient(),
         value.clone() - fee.clone(),
@@ -60,6 +69,7 @@ pub fn batch_transfer(
 
     let CanisterState {
         ref mut balances,
+        ref mut balances_tree,
         ref bidding_state,
         ref stats,
         ..
@@ -76,8 +86,15 @@ pub fn batch_transfer(
 
     {
         for (to, value) in transfers.clone() {
-            _charge_fee(balances, from, fee_to, fee.clone(), fee_ratio);
-            _transfer(balances, from, to, value.clone());
+            _charge_fee(
+                balances,
+                balances_tree,
+                from,
+                fee_to,
+                fee.clone(),
+                fee_ratio,
+            );
+            _transfer(balances, balances_tree, from, to, value.clone());
         }
     }
 
